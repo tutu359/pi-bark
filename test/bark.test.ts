@@ -22,11 +22,11 @@ type HarnessOptions = {
 	sessionName?: string;
 	sessionId?: string;
 	waitingDelayMs?: number;
-	select?: (title: string, options: string[]) => Promise<string | undefined>;
 };
 
 type TestContext = {
 	cwd: string;
+	mode: string;
 	hasUI: boolean;
 	isIdle(): boolean;
 	sessionManager: {
@@ -35,9 +35,18 @@ type TestContext = {
 	};
 	ui: {
 		notify(message: string, type?: string): void;
-		select(title: string, options: string[]): Promise<string | undefined>;
+		custom(factory: PanelFactory, options?: unknown): Promise<void>;
 	};
 };
+
+/** What the extension builds for `ui.custom`; the panel is driven directly in tests. */
+type PanelComponent = { handleInput?(data: string): void; render(width: number): string[] };
+type PanelFactory = (
+	tui: { requestRender(): void; setWidget?: unknown },
+	theme: { fg(color: string, text: string): string },
+	keybindings: unknown,
+	done: (result: void) => void,
+) => PanelComponent;
 
 function assistantEntry(text: string, stopReason = "stop"): SessionEntry {
 	return {
@@ -110,7 +119,12 @@ function harness(
 		getSessionName: () => options.sessionName,
 	} as unknown as ExtensionAPI;
 	barkExtension(pi, { copy: options.copy ?? (async () => {}), waitingDelayMs: options.waitingDelayMs });
-	return { agentDir, commands, handlers, tools, entries };
+	const panel: { component?: PanelComponent } = {};
+	const custom = async (factory: PanelFactory): Promise<void> =>
+		await new Promise<void>((resolve) => {
+			panel.component = factory({ requestRender: () => {} }, { fg: (_color, text) => text }, {}, () => resolve());
+		});
+	return { agentDir, commands, handlers, tools, entries, panel, custom };
 }
 
 function context(
@@ -118,19 +132,20 @@ function context(
 	overrides: Partial<TestContext> & {
 		notify?: (message: string) => void;
 		contextEntries?: SessionEntry[];
-		select?: (title: string, options: string[]) => Promise<string | undefined>;
+		custom?: (factory: PanelFactory) => Promise<void>;
 	} = {},
 ): TestContext {
-	const { notify, contextEntries, select, ...rest } = overrides;
+	const { notify, contextEntries, custom, ...rest } = overrides;
 	return {
 		cwd: join(agentDir, "project"),
+		mode: "tui",
 		hasUI: true,
 		isIdle: () => true,
 		sessionManager: {
 			buildContextEntries: () => contextEntries ?? [],
 			getSessionId: () => "abcdef123456",
 		},
-		ui: { notify: notify ?? (() => {}), select: select ?? (async () => undefined) },
+		ui: { notify: notify ?? (() => {}), custom: custom ?? (async () => {}) },
 		...rest,
 	};
 }
@@ -283,7 +298,7 @@ test("events stay silent until this session subscribes", async (t) => {
 	await handlers.get("ui_prompt_start")!({}, ctx);
 	await settle();
 	assert.deepEqual(pushes, [
-		{ device_key: "device-key", title: "Pi needs input · Deploy API", body: ctx.cwd, group: "Deploy API" },
+		{ device_key: "device-key", title: "Deploy API · Pi needs input", body: ctx.cwd, group: "Deploy API" },
 	]);
 });
 
@@ -307,49 +322,55 @@ test("two sessions in one directory notify independently", async (t) => {
 	await handlers.get("agent_settled")!({ type: "agent_settled", aborted: false }, subscribed);
 	await settle();
 	assert.deepEqual(pushes, [
-		{ device_key: "device-key", title: "Pi finished · Shared", body: subscribed.cwd, group: "Shared" },
+		{ device_key: "device-key", title: "Shared · Pi finished", body: subscribed.cwd, group: "Shared" },
 	]);
 });
 
-test("/bark toggles events for the session and cancels without writing", async (t) => {
-	// `ui.select` returns one of the option strings it was given, so pick by event name.
-	const answers = ["failed", "完成保存"];
-	const seen: string[][] = [];
-	const { agentDir, commands, entries } = harness(t, {
+test("/bark toggles on space, saves at once, and closes on escape", async (t) => {
+	const { agentDir, commands, entries, panel, custom } = harness(t, {
 		fetch: (async () => new Response(null, { status: 200 })) as typeof fetch,
 		sessionName: "Deploy API",
 	});
 	const notices: string[] = [];
-	const ctx = context(agentDir, {
-		notify: (message) => notices.push(message),
-		select: async (_title, options) => {
-			seen.push(options);
-			const wanted = answers.shift();
-			return options.find((option) => option === wanted || option.includes(`] ${wanted} `));
-		},
-	});
+	const ctx = context(agentDir, { notify: (message) => notices.push(message), custom });
 	await commands.get("set-bark")!("device-key", ctx);
 
-	await commands.get("bark")!("", ctx);
-	assert.equal(seen[0]?.at(-1), "完成保存");
-	assert.match(seen[0]?.[0] ?? "", /^\[ \] needsInput\s+等你确认$/);
-	assert.equal(seen[0]?.at(-1), "完成保存");
-	assert.match(seen[1]?.[2] ?? "", /^\[x\] failed\s+出错$/);
-	const stored = entries.at(-1) as { data?: { events: string[] } } | undefined;
-	assert.equal(stored?.data?.events.join(","), "failed");
-	assert.deepEqual(notices.at(-1), "Bark events for this session: failed");
+	const opening = commands.get("bark")!("", ctx);
+	await settle();
+	const component = panel.component;
+	assert.ok(component, "the command opens the panel");
+	const before = component.render(60).join("\n");
+	assert.match(before, /\[ \] needsInput\s+等你确认/);
+	assert.match(before, /已开启 0 项/);
+	assert.match(before, /空格 切换并保存/);
 
-	// Cancelling the selector leaves the stored subscription untouched.
-	const { commands: cancelled, entries: cancelledEntries } = harness(t, {
+	component.handleInput?.(" ");
+	await settle();
+	const stored = entries.at(-1) as { data?: { events: string[] } } | undefined;
+	assert.deepEqual(stored?.data?.events, ["needsInput"], "space saves immediately");
+	const after = component.render(60).join("\n");
+	assert.match(after, /\[x\] needsInput/);
+	assert.match(after, /已开启 1 项/);
+
+	component.handleInput?.("\u001b");
+	await opening;
+	assert.deepEqual(notices.at(-1), "Bark events for this session: needsInput");
+});
+
+test("/bark closes on escape without writing when nothing changed", async (t) => {
+	const { agentDir, commands, entries, panel, custom } = harness(t, {
 		fetch: (async () => new Response(null, { status: 200 })) as typeof fetch,
-		select: async () => undefined,
+		sessionName: "Deploy API",
 	});
-	const otherDir = mkdtempSync(join(tmpdir(), "pi-bark-cancel-"));
-	t.after(() => rmSync(otherDir, { recursive: true, force: true }));
-	const otherCtx = context(otherDir);
-	await cancelled.get("set-bark")!("device-key", otherCtx);
-	await cancelled.get("bark")!("", otherCtx);
-	assert.equal(cancelledEntries.length, 0);
+	const ctx = context(agentDir, { custom });
+	await commands.get("set-bark")!("device-key", ctx);
+	const writes = entries.length;
+
+	const opening = commands.get("bark")!("", ctx);
+	await settle();
+	panel.component?.handleInput?.("\u001b");
+	await opening;
+	assert.equal(entries.length, writes, "escape alone writes no session entry");
 });
 
 test("a settled run reports failure and survives a queued continuation", async (t) => {
@@ -368,7 +389,7 @@ test("a settled run reports failure and survives a queued continuation", async (
 	await handlers.get("message_end")!({ type: "message_end", message: { role: "assistant", stopReason: "error" } }, ctx);
 	await handlers.get("agent_settled")!({ type: "agent_settled", aborted: false }, ctx);
 	await settle();
-	assert.equal(pushes[0]?.title, "Pi failed · Deploy API");
+	assert.equal(pushes[0]?.title, "Deploy API · Pi failed");
 
 	// A handler after agent_settled can queue a continuation; the deferred idle check must suppress the push.
 	idle = false;
@@ -398,7 +419,7 @@ test("waitingTooLong fires once after the session sits idle", async (t) => {
 	await handlers.get("agent_settled")!({ type: "agent_settled", aborted: false }, ctx);
 	await new Promise((resolve) => setTimeout(resolve, 40));
 	assert.deepEqual(pushes, [
-		{ device_key: "device-key", title: "Pi is waiting for you · Deploy API", body: ctx.cwd, group: "Deploy API" },
+		{ device_key: "device-key", title: "Deploy API · Pi is waiting for you", body: ctx.cwd, group: "Deploy API" },
 	]);
 
 	// Typing cancels the pending notice.
@@ -426,11 +447,11 @@ test("compaction failure pushes on its own and marks the run failed", async (t) 
 		ctx,
 	);
 	await settle();
-	assert.equal(pushes[0]?.title, "Pi compaction failed · Deploy API");
+	assert.equal(pushes[0]?.title, "Deploy API · Pi compaction failed");
 
 	await handlers.get("agent_settled")!({ type: "agent_settled", aborted: false }, ctx);
 	await settle();
-	assert.equal(pushes[1]?.title, "Pi failed · Deploy API");
+	assert.equal(pushes[1]?.title, "Deploy API · Pi failed");
 });
 
 test("push encryption wraps every field in AES256-GCM", async (t) => {
@@ -461,7 +482,7 @@ test("push encryption wraps every field in AES256-GCM", async (t) => {
 	decipher.setAuthTag(raw.subarray(raw.length - 16));
 	const plaintext = Buffer.concat([decipher.update(raw.subarray(0, raw.length - 16)), decipher.final()]);
 	assert.deepEqual(JSON.parse(plaintext.toString("utf8")), {
-		title: "Pi finished · Deploy API",
+		title: "Deploy API · Pi finished",
 		body: ctx.cwd,
 		group: "Deploy API",
 	});

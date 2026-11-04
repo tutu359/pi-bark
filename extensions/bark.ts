@@ -8,10 +8,10 @@ import {
 } from "@earendil-works/pi-coding-agent";
 import { createBarkConfigStore, DEFAULT_SERVER_URL, parseServerUrl, writeBarkConfig } from "../src/config.ts";
 import { formatConfigIssues, registerConfigReporting } from "../src/config-store.ts";
-import { chooseEvents } from "../src/menu.ts";
+import { openEventPanel } from "../src/menu.ts";
 import { eventContent, sendPush } from "../src/push.ts";
 import { registerBarkPushTool } from "../src/push-tool.ts";
-import { type BarkEvent, readSubscription, SESSION_STATE_TYPE, sameEvents, sessionLabel } from "../src/session.ts";
+import { type BarkEvent, readSubscription, SESSION_STATE_TYPE, sessionLabel } from "../src/session.ts";
 
 /** How long a settled session waits in silence before saying it is still waiting. */
 const WAITING_DELAY_MS = 10 * 60_000;
@@ -33,6 +33,10 @@ function lastAssistantText(entries: readonly SessionEntry[]): string | undefined
 		if (text) return text;
 	}
 	return undefined;
+}
+
+function describeEvents(events: readonly BarkEvent[]): string {
+	return events.length ? events.join(", ") : "none (silent)";
 }
 
 export default function barkExtension(pi: ExtensionAPI, options: BarkExtensionOptions = {}): void {
@@ -165,22 +169,20 @@ export default function barkExtension(pi: ExtensionAPI, options: BarkExtensionOp
 			const home = homedir();
 			const title = `Bark · ${sessionLabel(ctx, pi.getSessionName())} · ${cwd.startsWith(`${home}/`) ? `~${cwd.slice(home.length)}` : cwd}`;
 			if (!ctx.hasUI) {
-				ctx.ui.notify(`${title}\nEvents: ${current.length ? current.join(", ") : "none (silent)"}`, "info");
+				ctx.ui.notify(`${title}\nEvents: ${describeEvents(current)}`, "info");
 				return;
 			}
-			const next = await chooseEvents(ctx.ui, title, current);
-			if (!next) return;
-			if (sameEvents(next, current)) {
-				ctx.ui.notify("Bark events unchanged.", "info");
+			if (ctx.mode !== "tui") {
+				ctx.ui.notify(`Open /bark in the TUI to change events (${describeEvents(current)}).`, "info");
 				return;
 			}
-			pi.appendEntry(SESSION_STATE_TYPE, { events: next });
-			ctx.ui.notify(
-				next.length
-					? `Bark events for this session: ${next.join(", ")}`
-					: "Bark events for this session: none (silent)",
-				"info",
-			);
+			// Space saves as it toggles, so Escape only closes the panel; report the state it left behind.
+			let latest: BarkEvent[] = current;
+			await openEventPanel(ctx.ui, title, current, (events) => {
+				latest = events;
+				pi.appendEntry(SESSION_STATE_TYPE, { events });
+			});
+			ctx.ui.notify(`Bark events for this session: ${describeEvents(latest)}`, "info");
 		},
 	});
 

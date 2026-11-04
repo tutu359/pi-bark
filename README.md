@@ -62,18 +62,19 @@ pi -e ./extensions/bark.ts
 /bark
 ```
 
-弹出一个勾选面板，回车切换，`Done` 保存：
+弹出一个勾选面板。**空格切换并立即保存，Esc 退出**，没有确认行：
 
 ```
-Bark · Deploy API · /Users/tutu/work/deploy
+Bark · Deploy API · ~/work/deploy
+空格 切换并保存 · ↑↓ 移动 · Esc 退出
 
-  ✗ needsInput      a blocking prompt needs your answer
-  ✗ finished        a run finishes
-  ✗ failed          a run fails
-  ✗ compactFailed   context compaction fails
-  ✗ waitingTooLong  Pi stays idle waiting for you
-  ─────────────────────────────────────────────
-  Done
+> [x] finished        跑完
+  [ ] failed          出错
+  [ ] needsInput      等你确认
+  [ ] compactFailed   压缩失败
+  [ ] waitingTooLong  停住 10 分钟
+
+已开启 1 项
 ```
 
 | 事件             | 触发时机                                                                        |
@@ -95,7 +96,7 @@ Bark · Deploy API · /Users/tutu/work/deploy
 
 ```
 group: Deploy API
-title: Pi finished · Deploy API
+title: Deploy API · Pi finished
 body: /Users/tutu/work/deploy
 ```
 

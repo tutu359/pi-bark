@@ -20,7 +20,7 @@ const EVENT_TITLES: Record<BarkEvent, string> = {
  * session's pushes together, and the body only says which directory the session runs in.
  */
 export function eventContent(event: BarkEvent, label: string, cwd: string): BarkPushContent {
-	return { title: `${EVENT_TITLES[event]} · ${label}`, body: cwd, group: label };
+	return { title: `${label} · ${EVENT_TITLES[event]}`, body: cwd, group: label };
 }
 
 export async function sendPush(
