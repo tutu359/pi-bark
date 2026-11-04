@@ -1,3 +1,4 @@
+import { homedir } from "node:os";
 import { resolve } from "node:path";
 import {
 	copyToClipboard,
@@ -160,7 +161,9 @@ export default function barkExtension(pi: ExtensionAPI, options: BarkExtensionOp
 				);
 			}
 			const current = readSubscription(ctx);
-			const title = `Bark · ${sessionLabel(ctx, pi.getSessionName())} · ${resolve(ctx.cwd)}`;
+			const cwd = resolve(ctx.cwd);
+			const home = homedir();
+			const title = `Bark · ${sessionLabel(ctx, pi.getSessionName())} · ${cwd.startsWith(`${home}/`) ? `~${cwd.slice(home.length)}` : cwd}`;
 			if (!ctx.hasUI) {
 				ctx.ui.notify(`${title}\nEvents: ${current.length ? current.join(", ") : "none (silent)"}`, "info");
 				return;

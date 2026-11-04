@@ -313,7 +313,7 @@ test("two sessions in one directory notify independently", async (t) => {
 
 test("/bark toggles events for the session and cancels without writing", async (t) => {
 	// `ui.select` returns one of the option strings it was given, so pick by event name.
-	const answers = ["failed", "Done"];
+	const answers = ["failed", "完成保存"];
 	const seen: string[][] = [];
 	const { agentDir, commands, entries } = harness(t, {
 		fetch: (async () => new Response(null, { status: 200 })) as typeof fetch,
@@ -325,14 +325,16 @@ test("/bark toggles events for the session and cancels without writing", async (
 		select: async (_title, options) => {
 			seen.push(options);
 			const wanted = answers.shift();
-			return options.find((option) => option === wanted || option.includes(` ${wanted} — `));
+			return options.find((option) => option === wanted || option.includes(`] ${wanted} `));
 		},
 	});
 	await commands.get("set-bark")!("device-key", ctx);
 
 	await commands.get("bark")!("", ctx);
-	assert.deepEqual(seen[0]?.slice(-1), ["Done"]);
-	assert.deepEqual(seen[0]?.[0], "✗ needsInput — a blocking prompt needs your answer");
+	assert.equal(seen[0]?.at(-1), "完成保存");
+	assert.match(seen[0]?.[0] ?? "", /^\[ \] needsInput\s+等你确认$/);
+	assert.equal(seen[0]?.at(-1), "完成保存");
+	assert.match(seen[1]?.[2] ?? "", /^\[x\] failed\s+出错$/);
 	const stored = entries.at(-1) as { data?: { events: string[] } } | undefined;
 	assert.equal(stored?.data?.events.join(","), "failed");
 	assert.deepEqual(notices.at(-1), "Bark events for this session: failed");

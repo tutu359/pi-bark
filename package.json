@@ -1,6 +1,6 @@
 {
 	"name": "pi-bark",
-	"version": "0.9.0",
+	"version": "0.9.1",
 	"description": "Bark notifications and response sharing for Pi.",
 	"keywords": [
 		"pi-package",

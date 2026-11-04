@@ -8,14 +8,6 @@ export type BarkEvent = (typeof EVENT_NAMES)[number];
 /** Session entry type that carries this session's subscription. Lives in the session file, not in config. */
 export const SESSION_STATE_TYPE = "pi-bark";
 
-export const EVENT_LABELS: Record<BarkEvent, string> = {
-	needsInput: "a blocking prompt needs your answer",
-	finished: "a run finishes",
-	failed: "a run fails",
-	compactFailed: "context compaction fails",
-	waitingTooLong: "Pi stays idle waiting for you",
-};
-
 function isEvent(value: unknown): value is BarkEvent {
 	return typeof value === "string" && (EVENT_NAMES as readonly string[]).includes(value);
 }
