@@ -96,7 +96,7 @@ Bark · Deploy API · ~/work/deploy
 
 ```
 group: Deploy API
-title: Deploy API · Pi finished
+title: Deploy API · finished
 body: /Users/tutu/work/deploy
 ```
 
@@ -115,6 +115,7 @@ body: /Users/tutu/work/deploy
 - `delete` 必须搭配 `id`
 - `call` / `isArchive` / `delete` 用布尔值，插件转成 Bark 要的 `"1"` / `"0"`
 - `title` 与 `group` 缺省时用会话名
+- `sound` 建议从内置铃声里选：`alarm` `anticipate` `bell` `birdsong` `bloom` `calypso` `chime` `choo` `descent` `electronic` `fanfare` `glass` `gotosleep` `healthnotification` `horn` `ladder` `mailsent` `minuet` `multiwayinvitation` `newmail` `newsflash` `noir` `paymentsuccess` `shake` `sherwoodforest` `silence` `spell` `suspense` `telegraph` `tiptoes` `typewriters` `update`。这份清单来自 Bark App 的 `Sounds/*.caf`，只是提示不是白名单 —— 名字不存在时 Bark 回退到默认铃声，自己导入的 `.caf` 也能直接用
 - 同一轮里完全相同的推送只发一次，避免死循环刷屏
 
 推送失败会把原因作为工具结果返回给模型，不会抛崩一次调用。

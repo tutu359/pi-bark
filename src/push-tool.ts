@@ -4,6 +4,7 @@ import type { BarkConfig } from "./config.ts";
 import type { ConfigLoad } from "./config-store.ts";
 import { type BarkPushContent, sendPush } from "./push.ts";
 import { sessionLabel } from "./session.ts";
+import { SOUND_HINT } from "./sounds.ts";
 
 const MAX_BODY_CHARS = 2000;
 
@@ -40,7 +41,7 @@ const PARAMETERS = Type.Object({
 	),
 	volume: Type.Optional(Type.Number({ minimum: 0, maximum: 10, description: "critical 时的音量 0-10" })),
 	call: Type.Optional(Type.Boolean({ description: "true 则铃声循环 30 秒" })),
-	sound: Type.Optional(Type.String({ description: "铃声名，例如 minuet" })),
+	sound: Type.Optional(Type.String({ description: "铃声名，取值见工具说明；缺省用 App 默认铃声" })),
 	copy: Type.Optional(Type.String({ description: "手动复制推送时复制的文本" })),
 	url: Type.Optional(Type.String({ description: "点击通知跳转的 URL" })),
 	action: Type.Optional(
@@ -137,12 +138,14 @@ export function registerBarkPushTool(
 			"volume only applies when level is critical.",
 			"title and group default to the session name.",
 			`body and markdown are limited to ${MAX_BODY_CHARS} characters.`,
+			SOUND_HINT,
 		].join(" "),
 		promptSnippet: "Send an iPhone push notification with a title and body",
 		promptGuidelines: [
 			"Use bark_push when the user asks to be notified by phone, or when a long task produces a result worth reporting while they are away.",
 			"Do not use bark_push for routine progress or to repeat what the terminal already shows; one push per meaningful outcome.",
 			"Keep bark_push bodies short: the user reads them on a lock screen.",
+			"Pick bark_push sound from the Bark sounds listed in its description; omit sound to use the device default.",
 		],
 		parameters: PARAMETERS,
 		async execute(_toolCallId, params, signal, _onUpdate, ctx) {

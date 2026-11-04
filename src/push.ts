@@ -8,11 +8,11 @@ export const REQUEST_TIMEOUT_MS = 15_000;
 export type BarkPushContent = Record<string, string>;
 
 const EVENT_TITLES: Record<BarkEvent, string> = {
-	needsInput: "Pi needs input",
-	finished: "Pi finished",
-	failed: "Pi failed",
-	compactFailed: "Pi compaction failed",
-	waitingTooLong: "Pi is waiting for you",
+	needsInput: "needs input",
+	finished: "finished",
+	failed: "failed",
+	compactFailed: "compaction failed",
+	waitingTooLong: "waiting for you",
 };
 
 /**
