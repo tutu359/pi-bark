@@ -13,6 +13,7 @@ type Command = (args: string, ctx: TestContext) => Promise<void>;
 type Handler = (event: unknown, ctx: TestContext) => unknown;
 type Tool = {
 	name: string;
+	description: string;
 	execute: (...args: unknown[]) => Promise<{ content: Array<{ text: string }>; isError?: boolean }>;
 };
 
