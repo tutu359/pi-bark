@@ -1,5 +1,5 @@
 import type { ExtensionUIContext } from "@earendil-works/pi-coding-agent";
-import { EVENT_LABELS, EVENT_NAMES, type BarkEvent } from "./session.ts";
+import { type BarkEvent, EVENT_LABELS, EVENT_NAMES } from "./session.ts";
 
 const DONE = "Done";
 

@@ -11,7 +11,10 @@ import { parseServerUrl } from "../src/config.ts";
 
 type Command = (args: string, ctx: TestContext) => Promise<void>;
 type Handler = (event: unknown, ctx: TestContext) => unknown;
-type Tool = { name: string; execute: (...args: unknown[]) => Promise<{ content: Array<{ text: string }>; isError?: boolean }> };
+type Tool = {
+	name: string;
+	execute: (...args: unknown[]) => Promise<{ content: Array<{ text: string }>; isError?: boolean }>;
+};
 
 type HarnessOptions = {
 	fetch: typeof fetch;
@@ -30,7 +33,10 @@ type TestContext = {
 		buildContextEntries(): SessionEntry[];
 		getSessionId(): string;
 	};
-	ui: { notify(message: string, type?: string): void; select(title: string, options: string[]): Promise<string | undefined> };
+	ui: {
+		notify(message: string, type?: string): void;
+		select(title: string, options: string[]): Promise<string | undefined>;
+	};
 };
 
 function assistantEntry(text: string, stopReason = "stop"): SessionEntry {
@@ -55,7 +61,10 @@ function subscription(...events: string[]): SessionEntry {
 }
 
 // Pi resolves config from the agent dir, so every harness owns a temporary directory and never touches real config.
-function harness(t: { mock: { method(object: object, name: string, implementation: unknown): void }; after(fn: () => void): void }, options: HarnessOptions) {
+function harness(
+	t: { mock: { method(object: object, name: string, implementation: unknown): void }; after(fn: () => void): void },
+	options: HarnessOptions,
+) {
 	const agentDir = mkdtempSync(join(tmpdir(), "pi-bark-test-"));
 	const previousAgentDir = process.env.PI_CODING_AGENT_DIR;
 	process.env.PI_CODING_AGENT_DIR = agentDir;
@@ -75,12 +84,15 @@ function harness(t: { mock: { method(object: object, name: string, implementatio
 		},
 		on(name: string, handler: Handler) {
 			const previous = handlers.get(name);
-			handlers.set(name, previous
-				? (event, ctx) => {
-					previous(event, ctx);
-					handler(event, ctx);
-				}
-				: handler);
+			handlers.set(
+				name,
+				previous
+					? (event, ctx) => {
+							previous(event, ctx);
+							handler(event, ctx);
+						}
+					: handler,
+			);
 		},
 		registerTool(tool: Tool) {
 			tools.set(tool.name, tool);
@@ -294,7 +306,9 @@ test("two sessions in one directory notify independently", async (t) => {
 
 	await handlers.get("agent_settled")!({ type: "agent_settled", aborted: false }, subscribed);
 	await settle();
-	assert.deepEqual(pushes, [{ device_key: "device-key", title: "Pi finished · Shared", body: subscribed.cwd, group: "Shared" }]);
+	assert.deepEqual(pushes, [
+		{ device_key: "device-key", title: "Pi finished · Shared", body: subscribed.cwd, group: "Shared" },
+	]);
 });
 
 test("/bark toggles events for the session and cancels without writing", async (t) => {
@@ -381,7 +395,9 @@ test("waitingTooLong fires once after the session sits idle", async (t) => {
 
 	await handlers.get("agent_settled")!({ type: "agent_settled", aborted: false }, ctx);
 	await new Promise((resolve) => setTimeout(resolve, 40));
-	assert.deepEqual(pushes, [{ device_key: "device-key", title: "Pi is waiting for you · Deploy API", body: ctx.cwd, group: "Deploy API" }]);
+	assert.deepEqual(pushes, [
+		{ device_key: "device-key", title: "Pi is waiting for you · Deploy API", body: ctx.cwd, group: "Deploy API" },
+	]);
 
 	// Typing cancels the pending notice.
 	await handlers.get("agent_settled")!({ type: "agent_settled", aborted: false }, ctx);
@@ -403,7 +419,10 @@ test("compaction failure pushes on its own and marks the run failed", async (t) 
 	await commands.get("set-bark")!("device-key", ctx);
 
 	handlers.get("agent_start")!({}, ctx);
-	await handlers.get("session_compact_failed")!({ type: "session_compact_failed", aborted: false, errorMessage: "boom" }, ctx);
+	await handlers.get("session_compact_failed")!(
+		{ type: "session_compact_failed", aborted: false, errorMessage: "boom" },
+		ctx,
+	);
 	await settle();
 	assert.equal(pushes[0]?.title, "Pi compaction failed · Deploy API");
 
@@ -415,7 +434,7 @@ test("compaction failure pushes on its own and marks the run failed", async (t) 
 test("push encryption wraps every field in AES256-GCM", async (t) => {
 	const bodies: Array<Record<string, string>> = [];
 	const key = "0123456789abcdef0123456789abcdef";
-	const { agentDir, commands, handlers } = harness(t, {
+	const { agentDir, handlers } = harness(t, {
 		fetch: (async (_input: string | URL | Request, init?: RequestInit) => {
 			bodies.push(JSON.parse(String(init?.body)) as Record<string, string>);
 			return new Response(null, { status: 200 });

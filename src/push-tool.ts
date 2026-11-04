@@ -1,7 +1,7 @@
 import type { ExtensionAPI, ExtensionContext } from "@earendil-works/pi-coding-agent";
-import { Type, type Static } from "typebox";
-import type { ConfigLoad } from "./config-store.ts";
+import { type Static, Type } from "typebox";
 import type { BarkConfig } from "./config.ts";
+import type { ConfigLoad } from "./config-store.ts";
 import { type BarkPushContent, sendPush } from "./push.ts";
 import { sessionLabel } from "./session.ts";
 
@@ -31,9 +31,12 @@ const PARAMETERS = Type.Object({
 	image: Type.Optional(Type.String({ description: "展开通知时显示的大图 URL" })),
 	badge: Type.Optional(Type.Integer({ description: "角标数字，0 清除角标与通知" })),
 	level: Type.Optional(
-		Type.Union([Type.Literal("active"), Type.Literal("timeSensitive"), Type.Literal("passive"), Type.Literal("critical")], {
-			description: "推送级别，默认 active",
-		}),
+		Type.Union(
+			[Type.Literal("active"), Type.Literal("timeSensitive"), Type.Literal("passive"), Type.Literal("critical")],
+			{
+				description: "推送级别，默认 active",
+			},
+		),
 	),
 	volume: Type.Optional(Type.Number({ minimum: 0, maximum: 10, description: "critical 时的音量 0-10" })),
 	call: Type.Optional(Type.Boolean({ description: "true 则铃声循环 30 秒" })),
@@ -53,7 +56,11 @@ type PushParams = Static<typeof PARAMETERS>;
 
 class PushInputError extends Error {}
 
-function text(description: string): { content: Array<{ type: "text"; text: string }>; details: { sent: boolean }; isError?: true } {
+function text(description: string): {
+	content: Array<{ type: "text"; text: string }>;
+	details: { sent: boolean };
+	isError?: true;
+} {
 	return { content: [{ type: "text", text: description }], details: { sent: false }, isError: true };
 }
 
@@ -69,7 +76,10 @@ function number(value: number | undefined): string | undefined {
 /** Bark wants every field as a string; a boolean parameter becomes the `"1"`/`"0"` that Bark expects. */
 function buildContent(params: PushParams, label: string): BarkPushContent {
 	if (!params.body && !params.markdown) throw new PushInputError("bark_push needs body or markdown.");
-	for (const [name, value] of [["body", params.body], ["markdown", params.markdown]] as const) {
+	for (const [name, value] of [
+		["body", params.body],
+		["markdown", params.markdown],
+	] as const) {
 		if (value !== undefined && value.length > MAX_BODY_CHARS) {
 			throw new PushInputError(`bark_push ${name} is ${value.length} characters; the limit is ${MAX_BODY_CHARS}.`);
 		}
@@ -139,9 +149,7 @@ export function registerBarkPushTool(
 			const loaded = load();
 			reporter.report(ctx, store, loaded);
 			if (loaded.status === "disabled") {
-				return text(
-					"Bark is not configured. Ask the user to run /set-bark <device-key>, then retry.",
-				);
+				return text("Bark is not configured. Ask the user to run /set-bark <device-key>, then retry.");
 			}
 			const label = sessionLabel(ctx, getSessionName());
 			let content: BarkPushContent;

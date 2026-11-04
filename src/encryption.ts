@@ -1,5 +1,5 @@
 import { createCipheriv, randomBytes } from "node:crypto";
-import { ENCRYPTION_KEY_BYTES, type BarkEncryption } from "./config.ts";
+import { type BarkEncryption, ENCRYPTION_KEY_BYTES } from "./config.ts";
 
 const GCM_IV_BYTES = 12;
 

@@ -42,11 +42,11 @@ pi -e ./extensions/bark.ts
 
 ```json
 {
-  "bark": {
-    "serverUrl": "https://api.day.app",
-    "deviceKey": "your-device-key",
-    "encryption": null
-  }
+	"bark": {
+		"serverUrl": "https://api.day.app",
+		"deviceKey": "your-device-key",
+		"encryption": null
+	}
 }
 ```
 
@@ -76,13 +76,13 @@ Bark · Deploy API · /Users/tutu/work/deploy
   Done
 ```
 
-| 事件 | 触发时机 |
-| --- | --- |
-| `needsInput` | 扩展弹出阻塞式对话框（`ui.select` / `confirm` / `input` / `editor` / `custom`） |
-| `finished` | 一轮自动运行真正停下，且没有错误 |
-| `failed` | 一轮停止时 `stopReason` 是错误，或运行中压缩失败 |
-| `compactFailed` | 上下文压缩失败（即使运行还在继续） |
-| `waitingTooLong` | 停下后静默 10 分钟仍无人输入，且期间没有新动作 |
+| 事件             | 触发时机                                                                        |
+| ---------------- | ------------------------------------------------------------------------------- |
+| `needsInput`     | 扩展弹出阻塞式对话框（`ui.select` / `confirm` / `input` / `editor` / `custom`） |
+| `finished`       | 一轮自动运行真正停下，且没有错误                                                |
+| `failed`         | 一轮停止时 `stopReason` 是错误，或运行中压缩失败                                |
+| `compactFailed`  | 上下文压缩失败（即使运行还在继续）                                              |
+| `waitingTooLong` | 停下后静默 10 分钟仍无人输入，且期间没有新动作                                  |
 
 订阅状态写进**当前会话**，所以：
 
@@ -149,6 +149,7 @@ pnpm key --disable
 ## 开发
 
 ```bash
+pnpm check        # biome：格式、lint、import 排序
 pnpm typecheck
 pnpm test
 pnpm pack:check
@@ -156,18 +157,18 @@ pnpm pack:check
 
 `pnpm test` 先构建配置和密钥脚本，再运行通知、工具与配置存储测试。测试使用临时目录并模拟网络、剪贴板和选择器，不会向真实设备发送通知。
 
-| 文件 | 职责 |
-| --- | --- |
-| `extensions/bark.ts` | Pi 事件、命令、推送编排 |
-| `src/config.ts` | `bark` 配置块的校验与修复写入 |
-| `src/config-store.ts` | 配置文件读取、校验、锁和原子写入 |
-| `src/session.ts` | 事件名单与会话级订阅读写 |
-| `src/menu.ts` | `/bark` 勾选面板 |
-| `src/push.ts` | 推送请求与事件正文 |
-| `src/push-tool.ts` | `bark_push` 工具定义 |
-| `src/encryption.ts` | 内容加密与密钥生成 |
-| `scripts/generate-encryption-key.ts` | 密钥管理命令 |
-| `test/` | 通知、工具与配置存储测试 |
+| 文件                                 | 职责                             |
+| ------------------------------------ | -------------------------------- |
+| `extensions/bark.ts`                 | Pi 事件、命令、推送编排          |
+| `src/config.ts`                      | `bark` 配置块的校验与修复写入    |
+| `src/config-store.ts`                | 配置文件读取、校验、锁和原子写入 |
+| `src/session.ts`                     | 事件名单与会话级订阅读写         |
+| `src/menu.ts`                        | `/bark` 勾选面板                 |
+| `src/push.ts`                        | 推送请求与事件正文               |
+| `src/push-tool.ts`                   | `bark_push` 工具定义             |
+| `src/encryption.ts`                  | 内容加密与密钥生成               |
+| `scripts/generate-encryption-key.ts` | 密钥管理命令                     |
+| `test/`                              | 通知、工具与配置存储测试         |
 
 依赖用 pnpm 管理，锁文件是 `pnpm-lock.yaml`。`pnpm-workspace.yaml` 里的 `allowBuilds` 只放行两个传递依赖的构建脚本（`protobufjs`、`@google/genai`），它们本身都是空操作，但 pnpm 默认要求显式批准。
 

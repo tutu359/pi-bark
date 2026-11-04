@@ -1,11 +1,12 @@
 import assert from "node:assert/strict";
 import { execFileSync } from "node:child_process";
-import { chmod, mkdir, mkdtemp, readFile, readdir, rm, stat, symlink, writeFile } from "node:fs/promises";
+import { chmod, mkdir, mkdtemp, readdir, readFile, rm, stat, symlink, writeFile } from "node:fs/promises";
 import { tmpdir } from "node:os";
 import { dirname, join } from "node:path";
 import test from "node:test";
 import { lock } from "proper-lockfile";
 import {
+	type ConfigLoad,
 	createConfigStore,
 	extensionConfigDir,
 	extensionConfigPath,
@@ -16,7 +17,6 @@ import {
 	registerConfigReporting,
 	required,
 	writePrivateTextFileAtomically,
-	type ConfigLoad,
 } from "../src/config-store.ts";
 
 function createStore(agentDir: string) {
@@ -93,7 +93,10 @@ test("private text writes are atomic, private, and clean up failures and aborts"
 		await writePrivateTextFileAtomically(path, "first");
 		await writePrivateTextFileAtomically(path, "second é");
 		assert.equal(await readFile(path, "utf8"), "second é");
-		assert.equal((await readdir(dirname(path))).some((entry) => entry.endsWith(".tmp")), false);
+		assert.equal(
+			(await readdir(dirname(path))).some((entry) => entry.endsWith(".tmp")),
+			false,
+		);
 		if (process.platform !== "win32") {
 			assert.equal((await stat(dirname(path))).mode & 0o777, 0o700);
 			assert.equal((await stat(path)).mode & 0o777, 0o600);
@@ -101,11 +104,16 @@ test("private text writes are atomic, private, and clean up failures and aborts"
 		const blocked = join(agentDir, "blocked", "usage.txt");
 		await mkdir(blocked, { recursive: true });
 		await assert.rejects(writePrivateTextFileAtomically(blocked, "blocked"));
-		assert.equal((await readdir(dirname(blocked))).some((entry) => entry.endsWith(".tmp")), false);
+		assert.equal(
+			(await readdir(dirname(blocked))).some((entry) => entry.endsWith(".tmp")),
+			false,
+		);
 		const aborted = join(agentDir, "not-created", "usage.txt");
 		const controller = new AbortController();
 		controller.abort();
-		await assert.rejects(writePrivateTextFileAtomically(aborted, "blocked", { signal: controller.signal }), { name: "AbortError" });
+		await assert.rejects(writePrivateTextFileAtomically(aborted, "blocked", { signal: controller.signal }), {
+			name: "AbortError",
+		});
 		await assert.rejects(stat(dirname(aborted)), { code: "ENOENT" });
 	});
 });
@@ -114,12 +122,31 @@ test("config paths reject traversal and missing config uses defaults without wri
 	const agentDir = await mkdtemp(join(tmpdir(), "pi-config-store-path-"));
 	try {
 		assert.equal(extensionConfigDir("pi-test-store", agentDir), join(agentDir, "config", "pi-test-store"));
-		assert.equal(extensionConfigPath("pi-test-store", agentDir), join(agentDir, "config", "pi-test-store", "config.json"));
-		for (const extensionId of ["", ".", "..", "../escape", "/tmp", "pi/test", "pi\\test", "Pi-test", "pi_test", "pi.test"]) {
+		assert.equal(
+			extensionConfigPath("pi-test-store", agentDir),
+			join(agentDir, "config", "pi-test-store", "config.json"),
+		);
+		for (const extensionId of [
+			"",
+			".",
+			"..",
+			"../escape",
+			"/tmp",
+			"pi/test",
+			"pi\\test",
+			"Pi-test",
+			"pi_test",
+			"pi.test",
+		]) {
 			assert.throws(() => extensionConfigPath(extensionId, agentDir), /extensionId/);
 		}
 		assert.deepEqual(await readdir(agentDir), []);
-		assert.deepEqual(createStore(agentDir).loadSync(), { status: "ok", source: "missing", value: { count: 0 }, issues: [] });
+		assert.deepEqual(createStore(agentDir).loadSync(), {
+			status: "ok",
+			source: "missing",
+			value: { count: 0 },
+			issues: [],
+		});
 		assert.deepEqual(await readdir(agentDir), []);
 	} finally {
 		await rm(agentDir, { recursive: true, force: true });
@@ -133,7 +160,13 @@ test("unknown keys and invalid optional values are reported and replaced by defa
 		const before = await readFile(store.path);
 		const loaded = store.loadSync();
 		assert.equal(loaded.status, "ok");
-		assert.deepEqual(loaded.status === "ok" && loaded.value, { mode: "fast", overrides: {}, dirs: [], limits: { idle: 5 }, directory: "/default" });
+		assert.deepEqual(loaded.status === "ok" && loaded.value, {
+			mode: "fast",
+			overrides: {},
+			dirs: [],
+			limits: { idle: 5 },
+			directory: "/default",
+		});
 		assert.deepEqual(loaded.issues, [
 			{ kind: "unknown-key", key: "modee", message: "unknown key" },
 			{ kind: "invalid-value", key: "mode", message: "must be one of fast, slow" },
@@ -146,21 +179,31 @@ test("unknown keys and invalid optional values are reported and replaced by defa
 test("bad nested entries are dropped individually", async () => {
 	await withAgentDir(async (agentDir) => {
 		const store = createRichStore(agentDir);
-		await writeConfig(store.path, JSON.stringify({
-			overrides: { "/ok": true, relative: true, "/bad": "yes" },
-			dirs: ["/a", 3, "/a", "/b"],
-			limits: { idle: -1 },
-		}));
+		await writeConfig(
+			store.path,
+			JSON.stringify({
+				overrides: { "/ok": true, relative: true, "/bad": "yes" },
+				dirs: ["/a", 3, "/a", "/b"],
+				limits: { idle: -1 },
+			}),
+		);
 		const loaded = store.loadSync();
 		assert.equal(loaded.status, "ok");
-		assert.deepEqual(loaded.status === "ok" && [loaded.value.overrides, loaded.value.dirs, loaded.value.limits], [{ "/ok": true }, ["/a", "/b"], { idle: 10 }]);
-		assert.deepEqual(loaded.issues.map(({ kind, key }) => [kind, key]), [
-			["unknown-key", "overrides.relative"],
-			["invalid-value", 'overrides["/bad"]'],
-			["invalid-value", "dirs[1]"],
-			["invalid-value", "dirs[2]"],
-			["invalid-value", "limits.idle"],
+		assert.deepEqual(loaded.status === "ok" && [loaded.value.overrides, loaded.value.dirs, loaded.value.limits], [
+			{ "/ok": true },
+			["/a", "/b"],
+			{ idle: 10 },
 		]);
+		assert.deepEqual(
+			loaded.issues.map(({ kind, key }) => [kind, key]),
+			[
+				["unknown-key", "overrides.relative"],
+				["invalid-value", 'overrides["/bad"]'],
+				["invalid-value", "dirs[1]"],
+				["invalid-value", "dirs[2]"],
+				["invalid-value", "limits.idle"],
+			],
+		);
 	});
 });
 
@@ -171,7 +214,9 @@ test("unsafe and required fields disable the config instead of defaulting", asyn
 		assert.deepEqual(unsafe.loadSync(), {
 			status: "disabled",
 			source: "file",
-			issues: [{ kind: "invalid-value", key: "directory", message: "must be an absolute path without control characters" }],
+			issues: [
+				{ kind: "invalid-value", key: "directory", message: "must be an absolute path without control characters" },
+			],
 		});
 
 		const strict = createConfigStore({
@@ -184,7 +229,12 @@ test("unsafe and required fields disable the config instead of defaulting", asyn
 		await writeConfig(strict.path, JSON.stringify({ retries: 2 }));
 		assert.deepEqual(strict.loadSync(), { status: "disabled", source: "file", issues: [missingIssue] });
 		await writeFile(strict.path, JSON.stringify({ token: " abc " }));
-		assert.deepEqual(strict.loadSync(), { status: "ok", source: "file", value: { token: "abc", retries: 1 }, issues: [] });
+		assert.deepEqual(strict.loadSync(), {
+			status: "ok",
+			source: "file",
+			value: { token: "abc", retries: 1 },
+			issues: [],
+		});
 		await writeFile(strict.path, "[]");
 		assert.equal(strict.loadSync().status, "disabled");
 	});
@@ -202,15 +252,30 @@ test("a near-miss key is an invalid value of the absent field that it misspells"
 				limits: field(parsers.object({ token: required(parsers.string()) }), { token: "t" }),
 			},
 		});
-		const nearMiss = (miss: string, key: string) => ({ kind: "invalid-value", key, message: `unknown key "${miss}"; did you mean "${key}"?` });
+		const nearMiss = (miss: string, key: string) => ({
+			kind: "invalid-value",
+			key,
+			message: `unknown key "${miss}"; did you mean "${key}"?`,
+		});
 
 		await writeConfig(store.path, JSON.stringify({ maxToken: 5 }));
-		assert.deepEqual(store.loadSync(), { status: "disabled", source: "file", issues: [nearMiss("maxToken", "maxTokens")] });
+		assert.deepEqual(store.loadSync(), {
+			status: "disabled",
+			source: "file",
+			issues: [nearMiss("maxToken", "maxTokens")],
+		});
 		await writeFile(store.path, JSON.stringify({ MAXTOKENS: 5 }));
-		assert.deepEqual(store.loadSync(), { status: "disabled", source: "file", issues: [nearMiss("MAXTOKENS", "maxTokens")] });
+		assert.deepEqual(store.loadSync(), {
+			status: "disabled",
+			source: "file",
+			issues: [nearMiss("MAXTOKENS", "maxTokens")],
+		});
 
 		// Optional fields use their defaults; distant keys, short keys, and keys beside the real one stay unknown.
-		await writeFile(store.path, JSON.stringify({ maxTokens: 5, maxToken: 6, reTires: 4, ix: "y", limits: { tokn: "z" }, unrelated: 1 }));
+		await writeFile(
+			store.path,
+			JSON.stringify({ maxTokens: 5, maxToken: 6, reTires: 4, ix: "y", limits: { tokn: "z" }, unrelated: 1 }),
+		);
 		assert.deepEqual(store.loadSync(), {
 			status: "ok",
 			source: "file",
@@ -259,7 +324,10 @@ test("entry maps load from a custom file name", async () => {
 		const loaded = store.loadSync();
 		assert.deepEqual(loaded.status === "ok" && loaded.value, { work: { model: "a/b" } });
 		assert.deepEqual(loaded.issues, [{ kind: "invalid-value", key: "broken", message: "model: required" }]);
-		assert.throws(() => createConfigStore({ extensionId: "pi-test-store", agentDir, fileName: "../x.json", fields: {} }), /fileName/);
+		assert.throws(
+			() => createConfigStore({ extensionId: "pi-test-store", agentDir, fileName: "../x.json", fields: {} }),
+			/fileName/,
+		);
 	});
 });
 
@@ -278,17 +346,26 @@ test("unreadable files become issues without throwing or writing", async () => {
 			const loaded = store.loadSync();
 			assert.equal(loaded.status, "ok");
 			assert.deepEqual(loaded.status === "ok" && loaded.value, { count: 0 });
-			assert.deepEqual(loaded.issues.map((issue) => issue.kind), [kind]);
+			assert.deepEqual(
+				loaded.issues.map((issue) => issue.kind),
+				[kind],
+			);
 			assert.deepEqual(await readFile(store.path), before);
 		}
 		if (process.platform !== "win32" && process.getuid?.() !== 0) {
 			await chmod(store.path, 0o000);
-			assert.deepEqual(store.loadSync().issues.map((issue) => issue.kind), ["unreadable"]);
+			assert.deepEqual(
+				store.loadSync().issues.map((issue) => issue.kind),
+				["unreadable"],
+			);
 			await chmod(store.path, 0o600);
 		}
 		await rm(store.path);
 		await mkdir(store.path);
-		assert.deepEqual(store.loadSync().issues.map((issue) => issue.kind), ["unreadable"]);
+		assert.deepEqual(
+			store.loadSync().issues.map((issue) => issue.kind),
+			["unreadable"],
+		);
 		assert.deepEqual(createRichStore(agentDir).loadSync().status, "disabled");
 	});
 });
@@ -298,8 +375,10 @@ test("update refuses files with issues; save validates and replaces them", async
 		const store = createStore(agentDir);
 		for (const contents of ["{ broken", '{"count":1,"extra":true}']) {
 			await writeConfig(store.path, contents);
-			await assert.rejects(store.update(({ count }) => ({ count: count + 1 })), (error: Error) =>
-				error.message.includes(store.path) && /has issues/.test(error.message));
+			await assert.rejects(
+				store.update(({ count }) => ({ count: count + 1 })),
+				(error: Error) => error.message.includes(store.path) && /has issues/.test(error.message),
+			);
 			assert.equal(await readFile(store.path, "utf8"), contents);
 		}
 		await assert.rejects(store.save({ count: -1 }), /count: must be an integer >= 0/);
@@ -308,7 +387,10 @@ test("update refuses files with issues; save validates and replaces them", async
 		await store.save({ count: 3 });
 		assert.deepEqual(store.loadSync(), { status: "ok", source: "file", value: { count: 3 }, issues: [] });
 		assert.deepEqual(await store.update(({ count }) => ({ count: count + 1 })), { count: 4 });
-		await assert.rejects(store.update(() => ({ count: -1 })), /count/);
+		await assert.rejects(
+			store.update(() => ({ count: -1 })),
+			/count/,
+		);
 		assert.deepEqual(store.loadSync(), { status: "ok", source: "file", value: { count: 4 }, issues: [] });
 	});
 });
@@ -321,21 +403,36 @@ test("launch reporting shows one deduplicated notification per file", async () =
 		await writeConfig(disabled.path, '{"directory":"relative"}');
 
 		let sessionStart: ((event: unknown, ctx: never) => void) | undefined;
-		const pi = { on: (event: string, handler: typeof sessionStart) => { if (event === "session_start") sessionStart = handler; } };
+		const pi = {
+			on: (event: string, handler: typeof sessionStart) => {
+				if (event === "session_start") sessionStart = handler;
+			},
+		};
 		const reporter = registerConfigReporting(pi as never, [warned, disabled]);
 		const notices: [string, string][] = [];
 		const ui = { hasUI: true, ui: { notify: (message: string, type: string) => notices.push([message, type]) } };
 
 		sessionStart!({}, ui as never);
 		assert.deepEqual(notices, [
-			[`pi-test-store config issues (${warned.path}): count: must be an integer >= 0; defaults replace invalid settings.`, "warning"],
-			[`pi-test-store disabled (${disabled.path}): directory: must be an absolute path without control characters`, "error"],
+			[
+				`pi-test-store config issues (${warned.path}): count: must be an integer >= 0; defaults replace invalid settings.`,
+				"warning",
+			],
+			[
+				`pi-test-store disabled (${disabled.path}): directory: must be an absolute path without control characters`,
+				"error",
+			],
 		]);
 
 		await writeFile(warned.path, '{"count":-1,"typo":1}');
 		reporter.report(ui as never, warned, warned.loadSync());
 		reporter.report(ui as never, warned, warned.loadSync());
-		assert.deepEqual(notices.slice(2), [[`pi-test-store config issues (${warned.path}): typo: unknown key; defaults replace invalid settings.`, "warning"]]);
+		assert.deepEqual(notices.slice(2), [
+			[
+				`pi-test-store config issues (${warned.path}): typo: unknown key; defaults replace invalid settings.`,
+				"warning",
+			],
+		]);
 
 		const written: string[] = [];
 		const write = process.stderr.write;
@@ -353,7 +450,14 @@ test("launch reporting shows one deduplicated notification per file", async () =
 
 		// Reporters of other extensions share the session's deduplication; Pi passes one event to every handler.
 		let otherStart: ((event: unknown, ctx: never) => void) | undefined;
-		registerConfigReporting({ on: (_event: string, handler: typeof otherStart) => { otherStart = handler; } } as never, [warned]);
+		registerConfigReporting(
+			{
+				on: (_event: string, handler: typeof otherStart) => {
+					otherStart = handler;
+				},
+			} as never,
+			[warned],
+		);
 		const event = {};
 		sessionStart!(event, ui as never);
 		otherStart!(event, ui as never);
@@ -366,7 +470,10 @@ test("replaceIfUnchanged writes under the lock only when the file still matches 
 	await withAgentDir(async (agentDir) => {
 		const store = createStore(agentDir);
 		const missing = store.loadSync();
-		await assert.rejects(store.replaceIfUnchanged({ ...missing }, { count: 1 }), /snapshot must be a loadSync\(\) result/);
+		await assert.rejects(
+			store.replaceIfUnchanged({ ...missing }, { count: 1 }),
+			/snapshot must be a loadSync\(\) result/,
+		);
 		await assert.rejects(createStore(join(agentDir, "other")).replaceIfUnchanged(missing, { count: 1 }), TypeError);
 		await store.replaceIfUnchanged(missing, { count: 1 });
 		assert.equal(await readFile(store.path, "utf8"), '{\n  "count": 1\n}\n');
@@ -375,8 +482,12 @@ test("replaceIfUnchanged writes under the lock only when the file still matches 
 		const snapshot = store.loadSync();
 		// Another writer edits the file after the snapshot.
 		await writeFile(store.path, '{"count":-1 }');
-		await assert.rejects(store.replaceIfUnchanged(snapshot, { count: 2 }), (error: Error) =>
-			error.message === `Config at ${store.path} changed since it was read; nothing was written. Read it again and retry.`);
+		await assert.rejects(
+			store.replaceIfUnchanged(snapshot, { count: 2 }),
+			(error: Error) =>
+				error.message ===
+				`Config at ${store.path} changed since it was read; nothing was written. Read it again and retry.`,
+		);
 		assert.equal(await readFile(store.path, "utf8"), '{"count":-1 }');
 
 		// The file changes after the caller's check but while the replacement waits for the lock.
@@ -392,17 +503,25 @@ test("replaceIfUnchanged writes under the lock only when the file still matches 
 	});
 });
 
-test("replaceIfUnchanged refuses a snapshot or reread that could not read the file", { skip: process.platform === "win32" || process.getuid?.() === 0 }, async () => {
+test("replaceIfUnchanged refuses a snapshot or reread that could not read the file", {
+	skip: process.platform === "win32" || process.getuid?.() === 0,
+}, async () => {
 	await withAgentDir(async (agentDir) => {
 		const store = createStore(agentDir);
 		await writeConfig(store.path, '{"count":-1}');
 		await chmod(store.path, 0o000);
 		const snapshot = store.loadSync();
-		assert.deepEqual(snapshot.issues.map(({ kind }) => kind), ["unreadable"]);
+		assert.deepEqual(
+			snapshot.issues.map(({ kind }) => kind),
+			["unreadable"],
+		);
 		// Another unreadable file with other bytes gives the same error text, so the snapshot proves nothing.
 		await rm(store.path);
 		await writeFile(store.path, '{"count":5}', { mode: 0o000 });
-		await assert.rejects(store.replaceIfUnchanged(snapshot, { count: 1 }), /was not read completely \(cannot read file: .*\), so it cannot be replaced safely; nothing was written/);
+		await assert.rejects(
+			store.replaceIfUnchanged(snapshot, { count: 1 }),
+			/was not read completely \(cannot read file: .*\), so it cannot be replaced safely; nothing was written/,
+		);
 		await chmod(store.path, 0o600);
 		assert.equal(await readFile(store.path, "utf8"), '{"count":5}');
 
@@ -421,9 +540,16 @@ test("replaceIfUnchanged refuses a file too large to read completely", async () 
 		const large = Buffer.alloc(200 * 1024, " ");
 		await writeConfig(store.path, large);
 		const snapshot = store.loadSync();
-		assert.deepEqual(snapshot.issues.map(({ kind }) => kind), ["too-large"]);
-		await assert.rejects(store.replaceIfUnchanged(snapshot, { count: 1 }), (error: Error) => error.message
-			=== `Config at ${store.path} was not read completely (file exceeds 65536 bytes), so it cannot be replaced safely; nothing was written. Fix, shrink, or remove the file, then retry.`);
+		assert.deepEqual(
+			snapshot.issues.map(({ kind }) => kind),
+			["too-large"],
+		);
+		await assert.rejects(
+			store.replaceIfUnchanged(snapshot, { count: 1 }),
+			(error: Error) =>
+				error.message ===
+				`Config at ${store.path} was not read completely (file exceeds 65536 bytes), so it cannot be replaced safely; nothing was written. Fix, shrink, or remove the file, then retry.`,
+		);
 		assert.deepEqual(await readFile(store.path), large);
 
 		// A file within the limit that grows past it under the lock is a change.
@@ -435,20 +561,29 @@ test("replaceIfUnchanged refuses a file too large to read completely", async () 
 	});
 });
 
-test("non-regular config paths are unreadable issues and never block", { skip: process.platform === "win32" }, async () => {
+test("non-regular config paths are unreadable issues and never block", {
+	skip: process.platform === "win32",
+}, async () => {
 	await withAgentDir(async (agentDir) => {
 		const store = createStore(agentDir);
 		await mkdir(store.path, { recursive: true });
-		assert.deepEqual(store.loadSync().issues, [{ kind: "unreadable", key: "", message: "cannot read file: not a regular file" }]);
+		assert.deepEqual(store.loadSync().issues, [
+			{ kind: "unreadable", key: "", message: "cannot read file: not a regular file" },
+		]);
 		await rm(store.path, { recursive: true });
 		// A FIFO without a writer would block a plain open; a device such as /dev/zero would never end.
 		execFileSync("mkfifo", [store.path]);
 		const fifo = store.loadSync();
 		assert.deepEqual(fifo.issues, [{ kind: "unreadable", key: "", message: "cannot read file: not a regular file" }]);
-		await assert.rejects(store.replaceIfUnchanged(fifo, { count: 1 }), /was not read completely \(cannot read file: not a regular file\)/);
+		await assert.rejects(
+			store.replaceIfUnchanged(fifo, { count: 1 }),
+			/was not read completely \(cannot read file: not a regular file\)/,
+		);
 		await rm(store.path);
 		await symlink("/dev/zero", store.path);
-		assert.deepEqual(store.loadSync().issues, [{ kind: "unreadable", key: "", message: "cannot read file: not a regular file" }]);
+		assert.deepEqual(store.loadSync().issues, [
+			{ kind: "unreadable", key: "", message: "cannot read file: not a regular file" },
+		]);
 	});
 });
 
@@ -456,8 +591,11 @@ test("concurrent updates do not lose changes", async () => {
 	await withAgentDir(async (agentDir) => {
 		const first = createStore(agentDir);
 		const second = createStore(agentDir);
-		await Promise.all(Array.from({ length: 12 }, (_, index) =>
-			(index % 2 === 0 ? first : second).update(({ count }) => ({ count: count + 1 }))));
+		await Promise.all(
+			Array.from({ length: 12 }, (_, index) =>
+				(index % 2 === 0 ? first : second).update(({ count }) => ({ count: count + 1 })),
+			),
+		);
 		assert.deepEqual(first.loadSync(), { status: "ok", source: "file", value: { count: 12 }, issues: [] });
 	});
 });
@@ -467,12 +605,18 @@ test("save is atomic and cleans failed temporary files", async () => {
 		const store = createStore(agentDir);
 		await store.save({ count: 1 });
 		assert.deepEqual(store.loadSync(), { status: "ok", source: "file", value: { count: 1 }, issues: [] });
-		assert.equal((await readdir(dirname(store.path))).some((entry) => entry.endsWith(".tmp")), false);
+		assert.equal(
+			(await readdir(dirname(store.path))).some((entry) => entry.endsWith(".tmp")),
+			false,
+		);
 
 		await rm(store.path);
 		await mkdir(store.path);
 		await assert.rejects(store.save({ count: 2 }));
-		assert.equal((await readdir(dirname(store.path))).some((entry) => entry.endsWith(".tmp")), false);
+		assert.equal(
+			(await readdir(dirname(store.path))).some((entry) => entry.endsWith(".tmp")),
+			false,
+		);
 	});
 });
 

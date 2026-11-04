@@ -1,16 +1,16 @@
 import { resolve } from "node:path";
-import { copyToClipboard, type ExtensionAPI, type ExtensionContext, type SessionEntry } from "@earendil-works/pi-coding-agent";
-import { formatConfigIssues, registerConfigReporting } from "../src/config-store.ts";
 import {
-	createBarkConfigStore,
-	DEFAULT_SERVER_URL,
-	parseServerUrl,
-	writeBarkConfig,
-} from "../src/config.ts";
+	copyToClipboard,
+	type ExtensionAPI,
+	type ExtensionContext,
+	type SessionEntry,
+} from "@earendil-works/pi-coding-agent";
+import { createBarkConfigStore, DEFAULT_SERVER_URL, parseServerUrl, writeBarkConfig } from "../src/config.ts";
+import { formatConfigIssues, registerConfigReporting } from "../src/config-store.ts";
 import { chooseEvents } from "../src/menu.ts";
 import { eventContent, sendPush } from "../src/push.ts";
 import { registerBarkPushTool } from "../src/push-tool.ts";
-import { type BarkEvent, readSubscription, sameEvents, SESSION_STATE_TYPE, sessionLabel } from "../src/session.ts";
+import { type BarkEvent, readSubscription, SESSION_STATE_TYPE, sameEvents, sessionLabel } from "../src/session.ts";
 
 /** How long a settled session waits in silence before saying it is still waiting. */
 const WAITING_DELAY_MS = 10 * 60_000;
@@ -47,9 +47,11 @@ export default function barkExtension(pi: ExtensionAPI, options: BarkExtensionOp
 	let runOutcome: "finished" | "failed" | "aborted" = "finished";
 	let waitingTimer: ReturnType<typeof setTimeout> | undefined;
 
-	const notifyWarning = (ctx: ExtensionContext) => (error: unknown): void => {
-		ctx.ui.notify(error instanceof Error ? error.message : String(error), "warning");
-	};
+	const notifyWarning =
+		(ctx: ExtensionContext) =>
+		(error: unknown): void => {
+			ctx.ui.notify(error instanceof Error ? error.message : String(error), "warning");
+		};
 
 	const clearWaiting = (): void => {
 		if (waitingTimer === undefined) return;
@@ -137,8 +139,9 @@ export default function barkExtension(pi: ExtensionAPI, options: BarkExtensionOp
 		const shouldSend = new Promise<boolean>((done) => {
 			setImmediate(() => done(ctx.isIdle()));
 		});
-		void queueEventPush(runOutcome === "failed" ? "failed" : "finished", ctx, shouldSend, controller.signal)
-			.catch(notifyWarning(ctx));
+		void queueEventPush(runOutcome === "failed" ? "failed" : "finished", ctx, shouldSend, controller.signal).catch(
+			notifyWarning(ctx),
+		);
 		scheduleWaiting(ctx);
 	});
 
@@ -170,7 +173,9 @@ export default function barkExtension(pi: ExtensionAPI, options: BarkExtensionOp
 			}
 			pi.appendEntry(SESSION_STATE_TYPE, { events: next });
 			ctx.ui.notify(
-				next.length ? `Bark events for this session: ${next.join(", ")}` : "Bark events for this session: none (silent)",
+				next.length
+					? `Bark events for this session: ${next.join(", ")}`
+					: "Bark events for this session: none (silent)",
 				"info",
 			);
 		},
@@ -201,9 +206,13 @@ export default function barkExtension(pi: ExtensionAPI, options: BarkExtensionOp
 			const [deviceKey, serverUrl = DEFAULT_SERVER_URL, extra] = args.trim().split(/\s+/);
 			if (!deviceKey || extra) throw new Error("Usage: /set-bark <device-key> [server-url]");
 			const url = parseServerUrl(serverUrl);
-			await writeBarkConfig(["bark.serverUrl", "bark.deviceKey"], (config) => ({
-				bark: { ...config.bark, serverUrl: url, deviceKey },
-			}), (store, result) => configReporter.report(ctx, store, result));
+			await writeBarkConfig(
+				["bark.serverUrl", "bark.deviceKey"],
+				(config) => ({
+					bark: { ...config.bark, serverUrl: url, deviceKey },
+				}),
+				(store, result) => configReporter.report(ctx, store, result),
+			);
 			ctx.ui.notify("Saved the Bark Device Key and server URL.", "info");
 		},
 	});

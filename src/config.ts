@@ -1,8 +1,8 @@
 import {
 	type ConfigLoad,
 	createConfigStore,
-	field,
 	type FieldParser,
+	field,
 	formatConfigIssues,
 	parsers,
 	required,
@@ -68,12 +68,12 @@ const serverUrl: FieldParser<string> = (raw) => {
 const encryption: FieldParser<BarkEncryption> = (raw) => {
 	const value = raw as Record<string, unknown>;
 	if (
-		Object.keys(value).length !== 4
-		|| value.algorithm !== ENCRYPTION_ALGORITHM
-		|| value.mode !== ENCRYPTION_MODE
-		|| value.padding !== ENCRYPTION_PADDING
-		|| typeof value.key !== "string"
-		|| Buffer.byteLength(value.key, "utf8") !== ENCRYPTION_KEY_BYTES
+		Object.keys(value).length !== 4 ||
+		value.algorithm !== ENCRYPTION_ALGORITHM ||
+		value.mode !== ENCRYPTION_MODE ||
+		value.padding !== ENCRYPTION_PADDING ||
+		typeof value.key !== "string" ||
+		Buffer.byteLength(value.key, "utf8") !== ENCRYPTION_KEY_BYTES
 	) {
 		throw new Error(
 			`expected ${ENCRYPTION_ALGORITHM}, ${ENCRYPTION_MODE}, ${ENCRYPTION_PADDING}, and a ${ENCRYPTION_KEY_BYTES}-byte UTF-8 key`,
@@ -143,27 +143,31 @@ export async function writeBarkConfig(
 	// The draft store has no disabling field, so it always loads a value.
 	if (current.status !== "ok") throw new Error(formatConfigIssues(current.issues));
 	const fileIssues = current.issues.filter(({ key }) => !key);
-	const blocking = current.source === "missing"
-		? []
-		: fileIssues.length
-			? fileIssues
-			: REQUIRED_PATHS
-				.filter((path) => valueAt(current.value, path) === undefined && !replaces.includes(path))
-				.map((path) =>
-					current.issues.find((issue) => issue.key === path)
-					?? { kind: "missing-required" as const, key: path, message: "required" }
-				);
+	const blocking =
+		current.source === "missing"
+			? []
+			: fileIssues.length
+				? fileIssues
+				: REQUIRED_PATHS.filter((path) => valueAt(current.value, path) === undefined && !replaces.includes(path)).map(
+						(path) =>
+							current.issues.find((issue) => issue.key === path) ?? {
+								kind: "missing-required" as const,
+								key: path,
+								message: "required",
+							},
+					);
 	if (blocking.length) throw new Error(`Fix the Bark config at ${store.path} first: ${formatConfigIssues(blocking)}`);
 	// A missing file has no settings to keep, so it starts from the defaults with an unset Device Key.
-	const draft = (config: BarkConfigDraft): BarkConfigDraft => current.source === "missing"
-		? {
-			bark: {
-				serverUrl: config.bark.serverUrl ?? DEFAULT_SERVER_URL,
-				deviceKey: config.bark.deviceKey ?? null,
-				encryption: config.bark.encryption ?? null,
-			},
-		}
-		: config;
+	const draft = (config: BarkConfigDraft): BarkConfigDraft =>
+		current.source === "missing"
+			? {
+					bark: {
+						serverUrl: config.bark.serverUrl ?? DEFAULT_SERVER_URL,
+						deviceKey: config.bark.deviceKey ?? null,
+						encryption: config.bark.encryption ?? null,
+					},
+				}
+			: config;
 	if (!current.issues.length) await store.update((config) => change(draft(config)));
 	// The change uses the snapshot, so the replacement refuses a file that another session changed meanwhile.
 	else await store.replaceIfUnchanged(current, change(draft(current.value)));
