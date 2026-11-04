@@ -299,7 +299,7 @@ test("events stay silent until this session subscribes", async (t) => {
 	await handlers.get("ui_prompt_start")!({}, ctx);
 	await settle();
 	assert.deepEqual(pushes, [
-		{ device_key: "device-key", title: "Deploy API · needs input", body: ctx.cwd, group: "Deploy API" },
+		{ device_key: "device-key", title: "Pi · Deploy API · needs input", body: ctx.cwd, group: "Deploy API" },
 	]);
 });
 
@@ -323,7 +323,7 @@ test("two sessions in one directory notify independently", async (t) => {
 	await handlers.get("agent_settled")!({ type: "agent_settled", aborted: false }, subscribed);
 	await settle();
 	assert.deepEqual(pushes, [
-		{ device_key: "device-key", title: "Shared · finished", body: subscribed.cwd, group: "Shared" },
+		{ device_key: "device-key", title: "Pi · Shared · finished", body: subscribed.cwd, group: "Shared" },
 	]);
 });
 
@@ -390,7 +390,7 @@ test("a settled run reports failure and survives a queued continuation", async (
 	await handlers.get("message_end")!({ type: "message_end", message: { role: "assistant", stopReason: "error" } }, ctx);
 	await handlers.get("agent_settled")!({ type: "agent_settled", aborted: false }, ctx);
 	await settle();
-	assert.equal(pushes[0]?.title, "Deploy API · failed");
+	assert.equal(pushes[0]?.title, "Pi · Deploy API · failed");
 
 	// A handler after agent_settled can queue a continuation; the deferred idle check must suppress the push.
 	idle = false;
@@ -420,7 +420,7 @@ test("waitingTooLong fires once after the session sits idle", async (t) => {
 	await handlers.get("agent_settled")!({ type: "agent_settled", aborted: false }, ctx);
 	await new Promise((resolve) => setTimeout(resolve, 40));
 	assert.deepEqual(pushes, [
-		{ device_key: "device-key", title: "Deploy API · waiting for you", body: ctx.cwd, group: "Deploy API" },
+		{ device_key: "device-key", title: "Pi · Deploy API · waiting for you", body: ctx.cwd, group: "Deploy API" },
 	]);
 
 	// Typing cancels the pending notice.
@@ -448,11 +448,11 @@ test("compaction failure pushes on its own and marks the run failed", async (t) 
 		ctx,
 	);
 	await settle();
-	assert.equal(pushes[0]?.title, "Deploy API · compaction failed");
+	assert.equal(pushes[0]?.title, "Pi · Deploy API · compaction failed");
 
 	await handlers.get("agent_settled")!({ type: "agent_settled", aborted: false }, ctx);
 	await settle();
-	assert.equal(pushes[1]?.title, "Deploy API · failed");
+	assert.equal(pushes[1]?.title, "Pi · Deploy API · failed");
 });
 
 test("push encryption wraps every field in AES256-GCM", async (t) => {
@@ -483,7 +483,7 @@ test("push encryption wraps every field in AES256-GCM", async (t) => {
 	decipher.setAuthTag(raw.subarray(raw.length - 16));
 	const plaintext = Buffer.concat([decipher.update(raw.subarray(0, raw.length - 16)), decipher.final()]);
 	assert.deepEqual(JSON.parse(plaintext.toString("utf8")), {
-		title: "Deploy API · finished",
+		title: "Pi · Deploy API · finished",
 		body: ctx.cwd,
 		group: "Deploy API",
 	});

@@ -38,5 +38,5 @@ export function sameEvents(left: readonly BarkEvent[], right: readonly BarkEvent
 export function sessionLabel(ctx: SessionRead, name: string | undefined): string {
 	const trimmed = name?.trim();
 	if (trimmed) return trimmed;
-	return `Pi · ${ctx.sessionManager.getSessionId().slice(0, 6)}`;
+	return ctx.sessionManager.getSessionId().slice(0, 6);
 }

@@ -96,11 +96,11 @@ Bark · Deploy API · ~/work/deploy
 
 ```
 group: Deploy API
-title: Deploy API · finished
+title: Pi · Deploy API · finished
 body: /Users/tutu/work/deploy
 ```
 
-`group` 用会话名，把同一会话的推送堆在一起，可在通知中心整组静音；没有命名时用 `Pi · <会话 id 前 6 位>`。
+`group` 用会话名，把同一会话的推送堆在一起，可在通知中心整组静音；没有命名时用会话 id 前 6 位，标题就是 `Pi · a1b2c3 · finished`。
 
 ## 主动推送工具
 
