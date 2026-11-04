@@ -14,7 +14,7 @@
 ## 安装与加载
 
 ```bash
-npm ci
+pnpm install
 pi -e ./extensions/bark.ts
 ```
 
@@ -128,7 +128,7 @@ body: /Users/tutu/work/deploy
 ## 推送加密
 
 ```bash
-npm run key
+pnpm key
 ```
 
 在 Bark App 的推送加密设置中选择 `AES256`、`GCM`、`noPadding`，填入生成的密钥。App 要求填 IV 时，填任意 12 个 ASCII 字符即可；实际推送每次使用新 IV。
@@ -136,8 +136,8 @@ npm run key
 更换或关闭：
 
 ```bash
-npm run key -- --force
-npm run key -- --disable
+pnpm key --force
+pnpm key --disable
 ```
 
 加密覆盖推送内容，不隐藏设备 Key，服务地址仍应使用 HTTPS。不要把密钥输出贴到公开日志。
@@ -149,12 +149,12 @@ npm run key -- --disable
 ## 开发
 
 ```bash
-npm run typecheck
-npm test
-npm run pack:check
+pnpm typecheck
+pnpm test
+pnpm pack:check
 ```
 
-`npm test` 先构建配置和密钥脚本，再运行通知、工具与配置存储测试。测试使用临时目录并模拟网络、剪贴板和选择器，不会向真实设备发送通知。
+`pnpm test` 先构建配置和密钥脚本，再运行通知、工具与配置存储测试。测试使用临时目录并模拟网络、剪贴板和选择器，不会向真实设备发送通知。
 
 | 文件 | 职责 |
 | --- | --- |
@@ -168,6 +168,8 @@ npm run pack:check
 | `src/encryption.ts` | 内容加密与密钥生成 |
 | `scripts/generate-encryption-key.ts` | 密钥管理命令 |
 | `test/` | 通知、工具与配置存储测试 |
+
+依赖用 pnpm 管理，锁文件是 `pnpm-lock.yaml`。`pnpm-workspace.yaml` 里的 `allowBuilds` 只放行两个传递依赖的构建脚本（`protobufjs`、`@google/genai`），它们本身都是空操作，但 pnpm 默认要求显式批准。
 
 ## 许可证
 

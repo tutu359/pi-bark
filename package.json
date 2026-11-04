@@ -26,11 +26,11 @@
   },
   "scripts": {
     "build": "tsc --project tsconfig.build.json",
-    "test": "npm run build && node --test test/*.test.ts",
+    "test": "pnpm run build && node --test test/*.test.ts",
     "typecheck": "tsc --noEmit --project tsconfig.json",
-    "prepack": "npm run build",
-    "pack:check": "npm pack --dry-run",
-    "key": "npm run build && node dist/scripts/generate-encryption-key.js"
+    "prepack": "pnpm run build",
+    "pack:check": "pnpm pack --dry-run",
+    "key": "pnpm run build && node dist/scripts/generate-encryption-key.js"
   },
   "peerDependencies": {
     "@earendil-works/pi-coding-agent": "^1.3.0"
@@ -53,5 +53,6 @@
   "private": true,
   "overrides": {
     "protobufjs": "7.6.6"
-  }
+  },
+  "packageManager": "pnpm@12.16.1"
 }
