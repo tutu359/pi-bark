@@ -23,23 +23,27 @@ if (args.length > 1 || (args.length === 1 && !force && !disable)) {
 } else {
 	try {
 		if (disable) {
-			await writeBarkConfig(["encryption"], (config) => ({ ...config, encryption: null }), report);
+			await writeBarkConfig(["bark.encryption"], (config) => ({
+				bark: { ...config.bark, encryption: null },
+			}), report);
 			console.log("Disabled Bark push encryption.");
 		} else {
 			let key = "";
 			// Without --force, an invalid existing key blocks the write instead of being replaced.
-			await writeBarkConfig(force ? ["encryption"] : [], (config) => {
-				if (config.encryption && !force) {
+			await writeBarkConfig(force ? ["bark.encryption"] : [], (config) => {
+				if (config.bark.encryption && !force) {
 					throw new Error("A Bark Custom Encryption Key already exists. Use --force to replace it.");
 				}
 				key = generateEncryptionKey();
 				return {
-					...config,
-					encryption: {
-						algorithm: ENCRYPTION_ALGORITHM,
-						mode: ENCRYPTION_MODE,
-						padding: ENCRYPTION_PADDING,
-						key,
+					bark: {
+						...config.bark,
+						encryption: {
+							algorithm: ENCRYPTION_ALGORITHM,
+							mode: ENCRYPTION_MODE,
+							padding: ENCRYPTION_PADDING,
+							key,
+						},
 					},
 				};
 			}, report);

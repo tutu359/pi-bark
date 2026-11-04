@@ -1,7 +1,8 @@
 # pi-bark
 
-将 Pi 的运行状态和回答发送到 iPhone 上的 Bark。
-支持完成、失败和等待输入通知，也可以手动发送最近一次回答，并通过 AES-256-GCM 加密推送内容。
+把 Pi 的运行事件和业务消息推送到 iPhone 上的 Bark。
+
+两条通道：**事件推送**（跑完、失败、等你确认）默认静默，需要某个会话自己去开；**主动推送工具** `bark_push` 一直可用，由模型自己决定推什么。
 
 ## 环境要求
 
@@ -12,27 +13,22 @@
 
 ## 安装与加载
 
-在项目目录安装依赖，然后加载插件：
-
 ```bash
 npm ci
 pi -e ./extensions/bark.ts
 ```
 
-需要长期加载时，用 `pi install` 指向本项目的绝对路径，再重新启动 Pi。
-同一插件只加载一次，避免重复命令和通知。
+需要长期加载时，用 `pi install` 指向本项目的绝对路径，再重新启动 Pi。同一插件只加载一次，避免重复命令和通知。
 
-## 配置 Bark
+## 配置设备 Key
 
-从 Bark App 的测试地址中取出设备 Key。例如地址为
-`https://api.day.app/your-device-key/Test`，设备 Key 就是 `your-device-key`。
-在 Pi 中运行：
+从 Bark App 的测试地址里取出设备 Key：地址 `https://api.day.app/your-device-key/Test` 里的 `your-device-key` 就是它。
 
 ```text
 /set-bark your-device-key
 ```
 
-使用自建服务时，补上服务地址：
+自建服务时补上地址：
 
 ```text
 /set-bark your-device-key https://bark.example.com
@@ -40,55 +36,115 @@ pi -e ./extensions/bark.ts
 
 不要把完整测试地址或 `/Test` 当作设备 Key。设备 Key 能授权向手机推送，应妥善保管。
 
-配置默认保存在 `~/.pi/agent/config/pi-bark/config.json`。
-设置了 `PI_CODING_AGENT_DIR` 时，使用该目录下的 `config/pi-bark/config.json`。
-配置修改在下一次命令或状态事件时生效。
+## 配置文件
 
-## 使用
+只有一个文件：`~/.pi/agent/config/pi-bark/config.json`（设置 `PI_CODING_AGENT_DIR` 时改用它下面的路径）。目录 `0700`、文件 `0600`、加锁 + 原子写入。
 
-| 命令 | 作用 |
+```json
+{
+  "bark": {
+    "serverUrl": "https://api.day.app",
+    "deviceKey": "your-device-key",
+    "encryption": null
+  }
+}
+```
+
+`bark` 三个字段都是必需的：`serverUrl` 决定 Device Key 发给谁，`encryption` 为 `null` 表示明文推送。任何一个缺失或非法，整个插件都会停用并提示修复，而不是悄悄回落到不安全的值。
+
+**事件订阅不在这里。** 它存在会话文件里，见下。
+
+## 事件推送
+
+**默认全静默。** 新会话不会推送任何事件，直到你在该会话里打开。
+
+```text
+/bark
+```
+
+弹出一个勾选面板，回车切换，`Done` 保存：
+
+```
+Bark · Deploy API · /Users/tutu/work/deploy
+
+  ✗ needsInput      a blocking prompt needs your answer
+  ✗ finished        a run finishes
+  ✗ failed          a run fails
+  ✗ compactFailed   context compaction fails
+  ✗ waitingTooLong  Pi stays idle waiting for you
+  ─────────────────────────────────────────────
+  Done
+```
+
+| 事件 | 触发时机 |
 | --- | --- |
-| `/copyb` | 复制最近一条助手回答并发送到 Bark |
-| `/bark on` | 为当前工作目录开启自动通知 |
-| `/bark off` | 为当前工作目录关闭自动通知 |
-| `/bark inherit` | 让当前目录继承默认通知设置 |
-| `/bark default on` | 默认开启自动通知 |
-| `/bark default off` | 默认关闭自动通知 |
-| `/set-bark <key> [server-url]` | 保存设备 Key 和服务地址 |
+| `needsInput` | 扩展弹出阻塞式对话框（`ui.select` / `confirm` / `input` / `editor` / `custom`） |
+| `finished` | 一轮自动运行真正停下，且没有错误 |
+| `failed` | 一轮停止时 `stopReason` 是错误，或运行中压缩失败 |
+| `compactFailed` | 上下文压缩失败（即使运行还在继续） |
+| `waitingTooLong` | 停下后静默 10 分钟仍无人输入，且期间没有新动作 |
 
-自动通知默认开启，只包含状态和会话名，不包含问题、回答或错误正文。
-运行最终结束、最终失败或出现阻塞式输入框时发送通知；用户取消运行时不发送结束通知。
-“完成”表示 Pi 已停止自动运行，不表示测试或业务目标一定成功。
+订阅状态写进**当前会话**，所以：
 
-目录开关按绝对工作路径精确匹配，会保存到配置文件；关闭自动通知不影响 `/copyb`。
-当前通过事件和用户命令发送通知，没有模型可调用的通知工具。
+- 同一个目录里的多个会话互不影响，各开各的
+- `--continue` / 恢复会话后订阅仍在，不用重新打开
+- 切换分支时按当前分支读取
+- 用户按 Esc 取消运行时不推送结束通知
 
-`/copyb` 保留回答中的 Markdown、代码块和换行，但不截断长内容。
-超出 Bark 或 Apple 推送负载限制时可能失败；请求超时为 15 秒，推送失败不撤销剪贴板复制。
-发送成功不等于手机已经收到，没有持久化重试队列。
+推送内容固定、不含回答正文：
+
+```
+group: Deploy API
+title: Pi finished · Deploy API
+body: /Users/tutu/work/deploy
+```
+
+`group` 用会话名，把同一会话的推送堆在一起，可在通知中心整组静音；没有命名时用 `Pi · <会话 id 前 6 位>`。
+
+## 主动推送工具
+
+`bark_push` 始终注册、始终可用，没有开关。模型用它汇报业务结论，字段基本对应 Bark 的推送参数（`device_key`、`device_keys`、`ciphertext`、`iv` 除外 —— 前两个是凭据，后两个由插件生成）。
+
+常用字段：`title` `subtitle` `body` `markdown` `group` `icon` `image` `badge` `level` `volume` `call` `sound` `copy` `url` `action` `isArchive` `ttl` `id` `delete`。
+
+规则：
+
+- `body` 与 `markdown` 至少给一个，两者都给时 `markdown` 生效
+- 单条正文上限 2000 字符，超了直接报错让模型缩短
+- `delete` 必须搭配 `id`
+- `call` / `isArchive` / `delete` 用布尔值，插件转成 Bark 要的 `"1"` / `"0"`
+- `title` 与 `group` 缺省时用会话名
+- 同一轮里完全相同的推送只发一次，避免死循环刷屏
+
+推送失败会把原因作为工具结果返回给模型，不会抛崩一次调用。
+
+## 隐私与边界
+
+- 事件推送只含事件名、会话名和工作目录，不含问题、回答或错误正文。
+- `bark_push` 的正文由模型生成，会经过 Bark 服务器。除非自建服务，默认走 `api.day.app`（第三方）。被读取到的内容因此有外传的可能，提示注入无法靠本插件挡住。
+- 没有持久化重试队列：请求超时 15 秒，失败就结束。
+- 发送成功不等于手机已收到。
 
 ## 推送加密
-
-生成并保存加密密钥：
 
 ```bash
 npm run key
 ```
 
-在 Bark App 的推送加密设置中选择 `AES256`、`GCM` 和 `noPadding`，填入生成的密钥。
-如果 App 要求填写 IV，可以填入任意 12 个 ASCII 字符；实际推送使用每次生成的新 IV。
-然后运行 `/copyb`，确认手机能显示正确正文。
+在 Bark App 的推送加密设置中选择 `AES256`、`GCM`、`noPadding`，填入生成的密钥。App 要求填 IV 时，填任意 12 个 ASCII 字符即可；实际推送每次使用新 IV。
 
-更换或关闭加密：
+更换或关闭：
 
 ```bash
 npm run key -- --force
 npm run key -- --disable
 ```
 
-这些命令会写入 Pi 配置；更换或关闭后，应同步更新手机 Bark 的设置。
-加密覆盖通知内容，不隐藏设备 Key，因此服务地址仍应使用 HTTPS。
-不要把密钥命令的输出贴到公开日志中。
+加密覆盖推送内容，不隐藏设备 Key，服务地址仍应使用 HTTPS。不要把密钥输出贴到公开日志。
+
+## 从 0.8 升级
+
+配置结构变了：原来的 `statusNotifications`（`defaultEnabled`、`cwdOverrides`）被移除，事件订阅改为按会话存储。旧文件里的 `statusNotifications` 会被当作未知键提示一次并忽略，之后所有事件静默 —— 这与新默认一致，但需要你在需要的会话里重新 `/bark` 打开。
 
 ## 开发
 
@@ -98,17 +154,20 @@ npm test
 npm run pack:check
 ```
 
-`npm test` 会先构建配置和密钥脚本，再运行通知与配置存储测试。
-测试使用临时目录并模拟网络和剪贴板，不会向真实设备发送通知。
+`npm test` 先构建配置和密钥脚本，再运行通知、工具与配置存储测试。测试使用临时目录并模拟网络、剪贴板和选择器，不会向真实设备发送通知。
 
 | 文件 | 职责 |
 | --- | --- |
-| `extensions/bark.ts` | Pi 事件、用户命令和 HTTP 推送 |
-| `src/config.ts` | Bark 配置校验与更新 |
+| `extensions/bark.ts` | Pi 事件、命令、推送编排 |
+| `src/config.ts` | `bark` 配置块的校验与修复写入 |
 | `src/config-store.ts` | 配置文件读取、校验、锁和原子写入 |
+| `src/session.ts` | 事件名单与会话级订阅读写 |
+| `src/menu.ts` | `/bark` 勾选面板 |
+| `src/push.ts` | 推送请求与事件正文 |
+| `src/push-tool.ts` | `bark_push` 工具定义 |
 | `src/encryption.ts` | 内容加密与密钥生成 |
 | `scripts/generate-encryption-key.ts` | 密钥管理命令 |
-| `test/` | 通知与配置存储测试 |
+| `test/` | 通知、工具与配置存储测试 |
 
 ## 许可证
 

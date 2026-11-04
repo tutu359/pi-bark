@@ -5,18 +5,19 @@ import {
 	createBarkConfigStore,
 	DEFAULT_SERVER_URL,
 	parseServerUrl,
-	statusNotificationsEnabled,
 	writeBarkConfig,
-	type BarkConfig,
 } from "../src/config.ts";
-import { encryptPushContent } from "../src/encryption.ts";
+import { chooseEvents } from "../src/menu.ts";
+import { eventContent, sendPush } from "../src/push.ts";
+import { registerBarkPushTool } from "../src/push-tool.ts";
+import { type BarkEvent, readSubscription, sameEvents, SESSION_STATE_TYPE, sessionLabel } from "../src/session.ts";
 
-const REQUEST_TIMEOUT_MS = 15_000;
-
-type BarkPushContent = { body: string } & Record<string, string>;
+/** How long a settled session waits in silence before saying it is still waiting. */
+const WAITING_DELAY_MS = 10 * 60_000;
 
 type BarkExtensionOptions = {
 	copy?: (text: string) => Promise<void>;
+	waitingDelayMs?: number;
 };
 
 function lastAssistantText(entries: readonly SessionEntry[]): string | undefined {
@@ -33,69 +34,84 @@ function lastAssistantText(entries: readonly SessionEntry[]): string | undefined
 	return undefined;
 }
 
-async function sendPush(
-	config: BarkConfig,
-	content: BarkPushContent,
-	cancelSignal?: AbortSignal,
-): Promise<void> {
-	const payload = config.encryption ? encryptPushContent(content, config.encryption) : content;
-	let response: Response;
-	try {
-		response = await fetch(`${config.serverUrl}/push`, {
-			method: "POST",
-			headers: { "Content-Type": "application/json; charset=utf-8" },
-			body: JSON.stringify({ device_key: config.deviceKey, ...payload }),
-			signal: cancelSignal
-				? AbortSignal.any([cancelSignal, AbortSignal.timeout(REQUEST_TIMEOUT_MS)])
-				: AbortSignal.timeout(REQUEST_TIMEOUT_MS),
-		});
-	} catch (error) {
-		if (cancelSignal?.aborted) return;
-		throw new Error(`Bark push request failed: ${error instanceof Error ? error.message : String(error)}`);
-	}
-	if (!response.ok) throw new Error(`Bark push request failed with HTTP ${response.status}.`);
-}
-
 export default function barkExtension(pi: ExtensionAPI, options: BarkExtensionOptions = {}): void {
 	const configStore = createBarkConfigStore();
 	const configReporter = registerConfigReporting(pi, [configStore]);
 	const copy = options.copy ?? copyToClipboard;
+	const waitingDelayMs = options.waitingDelayMs ?? WAITING_DELAY_MS;
 
 	let statusPushQueue = Promise.resolve();
 	let pendingSettledPush: AbortController | undefined;
 	// Mirrors Pi's ProgramStatusReporter: the latest assistant message or active-run compaction failure decides the outcome.
 	let runActive = false;
 	let runOutcome: "finished" | "failed" | "aborted" = "finished";
-	const queueStatus = async (
-		title: string,
+	let waitingTimer: ReturnType<typeof setTimeout> | undefined;
+
+	const notifyWarning = (ctx: ExtensionContext) => (error: unknown): void => {
+		ctx.ui.notify(error instanceof Error ? error.message : String(error), "warning");
+	};
+
+	const clearWaiting = (): void => {
+		if (waitingTimer === undefined) return;
+		clearTimeout(waitingTimer);
+		waitingTimer = undefined;
+	};
+
+	/**
+	 * Queue one event push. A disabled config or an unsubscribed event sends nothing: the session
+	 * opt-in lives in the session file, so a new session is silent until /bark enables events.
+	 */
+	const queueEventPush = (
+		event: BarkEvent,
 		ctx: ExtensionContext,
 		shouldSend?: Promise<boolean>,
 		cancelSignal?: AbortSignal,
 	): Promise<void> => {
 		const loaded = configStore.loadSync();
 		configReporter.report(ctx, configStore, loaded);
-		if (loaded.status === "disabled" || !statusNotificationsEnabled(loaded.value, ctx.cwd)) return;
-		const configSnapshot = loaded.value;
-		const sessionName = pi.getSessionName()?.trim() || "Unnamed";
-		const contentSnapshot = { title, body: `Pi session: ${sessionName}` };
-		const send = async () => {
+		if (loaded.status === "disabled") return Promise.resolve();
+		if (!readSubscription(ctx).includes(event)) return Promise.resolve();
+		const connection = loaded.value.bark;
+		const content = eventContent(event, sessionLabel(ctx, pi.getSessionName()), resolve(ctx.cwd));
+		const send = async (): Promise<void> => {
 			if (shouldSend && !(await shouldSend)) return;
-			await sendPush(configSnapshot, contentSnapshot, cancelSignal);
+			await sendPush(connection, content, cancelSignal);
 		};
 		statusPushQueue = statusPushQueue.then(send, send);
 		return statusPushQueue;
 	};
 
+	/** After a settled run, say once that the session is still waiting, then stay quiet until the next run. */
+	const scheduleWaiting = (ctx: ExtensionContext): void => {
+		clearWaiting();
+		if (!readSubscription(ctx).includes("waitingTooLong")) return;
+		waitingTimer = setTimeout(() => {
+			waitingTimer = undefined;
+			if (!ctx.isIdle()) return;
+			void queueEventPush("waitingTooLong", ctx).catch(notifyWarning(ctx));
+		}, waitingDelayMs);
+		waitingTimer.unref?.();
+	};
+
+	const tool = registerBarkPushTool(
+		pi,
+		() => configStore.loadSync(),
+		() => pi.getSessionName(),
+		configReporter,
+		configStore,
+	);
+
 	pi.on("ui_prompt_start", (_event, ctx) => {
-		void queueStatus("Pi needs input", ctx).catch((error) => {
-			ctx.ui.notify(error instanceof Error ? error.message : String(error), "warning");
-		});
+		clearWaiting();
+		void queueEventPush("needsInput", ctx).catch(notifyWarning(ctx));
 	});
 
 	pi.on("agent_start", () => {
 		runActive = true;
 		runOutcome = "finished";
 		pendingSettledPush?.abort();
+		clearWaiting();
+		tool.reset();
 	});
 
 	pi.on("message_end", (event) => {
@@ -103,66 +119,58 @@ export default function barkExtension(pi: ExtensionAPI, options: BarkExtensionOp
 		runOutcome = event.message.stopReason === "error" ? "failed" : "finished";
 	});
 
-	pi.on("session_compact_failed", (event) => {
-		if (!runActive) return;
-		if (event.aborted) runOutcome = "aborted";
-		else if (event.errorMessage) runOutcome = "failed";
+	pi.on("session_compact_failed", (event, ctx) => {
+		if (event.aborted) {
+			if (runActive) runOutcome = "aborted";
+			return;
+		}
+		if (runActive && event.errorMessage) runOutcome = "failed";
+		if (event.errorMessage) void queueEventPush("compactFailed", ctx).catch(notifyWarning(ctx));
 	});
 
 	pi.on("agent_settled", (event, ctx) => {
 		runActive = false;
 		if (event.aborted || runOutcome === "aborted" || !ctx.isIdle()) return;
-		const title = runOutcome === "failed" ? "Pi failed" : "Pi finished";
 		const controller = new AbortController();
 		pendingSettledPush?.abort();
 		pendingSettledPush = controller;
-		const shouldSend = new Promise<boolean>((resolve) => {
-			setImmediate(() => resolve(ctx.isIdle()));
+		const shouldSend = new Promise<boolean>((done) => {
+			setImmediate(() => done(ctx.isIdle()));
 		});
-		void queueStatus(title, ctx, shouldSend, controller.signal).catch((error) => {
-			ctx.ui.notify(error instanceof Error ? error.message : String(error), "warning");
-		});
+		void queueEventPush(runOutcome === "failed" ? "failed" : "finished", ctx, shouldSend, controller.signal)
+			.catch(notifyWarning(ctx));
+		scheduleWaiting(ctx);
 	});
 
+	pi.on("input", () => clearWaiting());
+	pi.on("session_shutdown", () => clearWaiting());
+
 	pi.registerCommand("bark", {
-		description: "Configure automatic Bark status notifications",
+		description: "Choose which events notify this session",
 		handler: async (args, ctx) => {
-			const [first, second, extra] = args.trim().split(/\s+/);
-			const valid =
-				first === "default"
-					? ["on", "off"].includes(second) && !extra
-					: ["on", "off", "inherit"].includes(first) && !second;
-			if (!valid) throw new Error("Usage: /bark <on|off|inherit> | default <on|off>");
-			// A status setting fixes nothing that disables pi-bark, so do not report a change that sends nothing.
+			if (args.trim()) throw new Error("Usage: /bark");
 			const loaded = configStore.loadSync();
 			configReporter.report(ctx, configStore, loaded);
 			if (loaded.status === "disabled") {
-				throw new Error(`Bark is not configured (${formatConfigIssues(loaded.issues)}). Run /set-bark <device-key> [server-url] or fix ${configStore.path} first.`);
+				throw new Error(
+					`Bark is not configured (${formatConfigIssues(loaded.issues)}). Run /set-bark <device-key> or fix ${configStore.path} first.`,
+				);
 			}
-			const report: Parameters<typeof writeBarkConfig>[2] = (store, result) => configReporter.report(ctx, store, result);
-			if (first === "default") {
-				const enabled = second === "on";
-				await writeBarkConfig([], (config) => ({
-					...config,
-					statusNotifications: { ...config.statusNotifications, defaultEnabled: enabled },
-				}), report);
-				ctx.ui.notify(`${enabled ? "Enabled" : "Disabled"} Bark status notifications by default.`, "info");
+			const current = readSubscription(ctx);
+			const title = `Bark · ${sessionLabel(ctx, pi.getSessionName())} · ${resolve(ctx.cwd)}`;
+			if (!ctx.hasUI) {
+				ctx.ui.notify(`${title}\nEvents: ${current.length ? current.join(", ") : "none (silent)"}`, "info");
 				return;
 			}
-			const cwd = resolve(ctx.cwd);
-			await writeBarkConfig([], (config) => {
-				const cwdOverrides = { ...config.statusNotifications.cwdOverrides };
-				if (first === "inherit") delete cwdOverrides[cwd];
-				else cwdOverrides[cwd] = first === "on";
-				return {
-					...config,
-					statusNotifications: { ...config.statusNotifications, cwdOverrides },
-				};
-			}, report);
+			const next = await chooseEvents(ctx.ui, title, current);
+			if (!next) return;
+			if (sameEvents(next, current)) {
+				ctx.ui.notify("Bark events unchanged.", "info");
+				return;
+			}
+			pi.appendEntry(SESSION_STATE_TYPE, { events: next });
 			ctx.ui.notify(
-				first === "inherit"
-					? "This CWD now inherits the default Bark notification setting."
-					: `${first === "on" ? "Enabled" : "Disabled"} Bark status notifications for this CWD.`,
+				next.length ? `Bark events for this session: ${next.join(", ")}` : "Bark events for this session: none (silent)",
 				"info",
 			);
 		},
@@ -175,15 +183,14 @@ export default function barkExtension(pi: ExtensionAPI, options: BarkExtensionOp
 			const loaded = configStore.loadSync();
 			configReporter.report(ctx, configStore, loaded);
 			if (loaded.status === "disabled") {
-				throw new Error(`Bark is not configured (${formatConfigIssues(loaded.issues)}). Run /set-bark <device-key> [server-url] or fix ${configStore.path}.`);
+				throw new Error(
+					`Bark is not configured (${formatConfigIssues(loaded.issues)}). Run /set-bark <device-key> or fix ${configStore.path}.`,
+				);
 			}
-			const config = loaded.value;
-
 			const text = lastAssistantText(ctx.sessionManager.buildContextEntries());
 			if (!text) throw new Error("No agent messages to copy yet.");
-
 			await copy(text);
-			await sendPush(config, { body: text });
+			await sendPush(loaded.value.bark, { body: text });
 			ctx.ui.notify("Copied the last agent message and sent a Bark push notification.", "info");
 		},
 	});
@@ -194,8 +201,9 @@ export default function barkExtension(pi: ExtensionAPI, options: BarkExtensionOp
 			const [deviceKey, serverUrl = DEFAULT_SERVER_URL, extra] = args.trim().split(/\s+/);
 			if (!deviceKey || extra) throw new Error("Usage: /set-bark <device-key> [server-url]");
 			const url = parseServerUrl(serverUrl);
-			await writeBarkConfig(["serverUrl", "deviceKey"], (config) => ({ ...config, serverUrl: url, deviceKey }), (store, result) =>
-				configReporter.report(ctx, store, result));
+			await writeBarkConfig(["bark.serverUrl", "bark.deviceKey"], (config) => ({
+				bark: { ...config.bark, serverUrl: url, deviceKey },
+			}), (store, result) => configReporter.report(ctx, store, result));
 			ctx.ui.notify("Saved the Bark Device Key and server URL.", "info");
 		},
 	});
